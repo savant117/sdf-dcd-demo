@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>SDF-SDF Collisions Demo</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #cddbf0; }
+        canvas { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; display: block; outline: none; touch-action: none; }
+        #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                   font: 15px system-ui, -apple-system, "Segoe UI", sans-serif; color: #2c3a52; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" tabindex="-1"></canvas>
+    <div id="loading">Loading demo&hellip;</div>
+    <script>
+        var Module = {
+            canvas: document.getElementById("canvas"),
+            print: function (text) { console.log(text); },
+            printErr: function (text) { console.warn(text); }
+        };
+        Module.canvas.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+        Module.canvas.addEventListener("webglcontextlost", function (e) {
+            e.preventDefault();
+            var message = document.getElementById("loading") || document.body.appendChild(document.createElement("div"));
+            message.id = "loading";
+            message.textContent = "WebGL context lost, please reload the page.";
+        });
+    </script>
+    {{{ SCRIPT }}}
+</body>
+</html>

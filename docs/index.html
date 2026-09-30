@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SDF Collisions via Caching and Importance Sampling</title>
+    <meta name="description" content="Real-Time Collision Handling for Signed Distance Fields via Caching and Importance Sampling. C. Giles and S. Andrews, Pacific Graphics 2026 (Computer Graphics Forum 45(7)).">
+    <meta property="og:title" content="Real-Time Collision Handling for Signed Distance Fields via Caching and Importance Sampling">
+    <meta property="og:description" content="Sparse, stable SDF-SDF contact manifolds from temporal caching and curvature-guided importance sampling. Pacific Graphics 2026.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://savant117.github.io/sdf-dcd-demo/">
+    <meta property="og:image" content="https://savant117.github.io/sdf-dcd-demo/images/teaser.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="theme-color" content="#2f6db5">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='9' width='17' height='17' rx='3' fill='%232f6db5' transform='rotate(-12 11 17)'/%3E%3Ccircle cx='21' cy='13' r='8' fill='%235e9c3f' fill-opacity='0.85'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\(', right: '\\)', display: false }] });"></script>
+    <link rel="stylesheet" href="style.css">
+    <script>try { var theme = localStorage.getItem('theme'); if (theme) document.documentElement.setAttribute('data-theme', theme); } catch (e) { }</script>
+</head>
+<body>
+    <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+
+    <header class="hero">
+        <div class="venue">Pacific Graphics 2026 &middot; Computer Graphics Forum 45(7)</div>
+        <h1>Real-Time Collision Handling for Signed Distance Fields via Caching and Importance Sampling</h1>
+        <p class="authors"><span>Chris Giles<sup>1</sup></span><span>Sheldon Andrews<sup>2</sup></span></p>
+        <p class="affiliations"><span><sup>1</sup>Independent researcher, USA</span><span><sup>2</sup>&Eacute;cole de technologie sup&eacute;rieure, Canada</span></p>
+        <nav class="links">
+            <a class="button" href="paper.pdf">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>
+                Paper
+            </a>
+            <a class="button" href="#video">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m22 8-5 4 5 4z"/></svg>
+                Video
+            </a>
+            <a class="button" href="#demo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10"/></svg>
+                Live Demo
+            </a>
+            <a class="button" href="https://github.com/savant117/sdf-dcd-demo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>
+                Code
+            </a>
+            <a class="button secondary" href="#citation">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5H3v7h4c0 4-2 6-4 6zM14 21c3 0 7-1 7-8V5h-7v7h4c0 4-2 6-4 6z"/></svg>
+                BibTeX
+            </a>
+        </nav>
+    </header>
+
+    <main>
+        <figure>
+            <img src="images/teaser.png" alt="Four large scenes simulated with the method: a collapsing colosseum of boxes, a pile of bunnies, a funnel pouring cylinders and cows on a bed of spikes" width="759" height="416">
+            <figcaption><b>Figure 1:</b> Large-scale environments simulated with our SDF-SDF collision framework: Colosseum, Bunnies, Funnel with cylinders and Cows on spikes. All scenes run at real-time rates with thousands of concurrent contacts.</figcaption>
+        </figure>
+
+        <section id="abstract">
+            <h2>Abstract</h2>
+            <p class="lead">This paper introduces a robust collision detection framework for SDF-encoded geometry, which has seen widespread adoption as a geometric representation in computer graphics. Our approach is designed to satisfy the competing requirements of numerical stability and computational efficiency of interactive and real-time applications. Our collision management strategy pairs temporal coherence caching with curvature-guided importance sampling. This scheme reliably forms sparse, stable contact manifolds, even for complex non-convex geometries. Quantitative evaluations against existing baselines demonstrate significant improvements in both runtime performance and simulation stability. While compatible with a range of numerical backends, our framework demonstrates how specific solver choices, such as derivative-free optimizers, yield additional gains in speed and convergence stability. Furthermore, the algorithm is highly parallelizable and well-suited for GPU architectures, scaling effectively to complex environments containing thousands of rigid bodies while maintaining real-time frame rates. Our proposed method is validated through comparisons on complex simulation scenes and ablation studies examining the influence of various optimizers and sampling strategies.</p>
+        </section>
+
+        <section id="video">
+            <h2>Video</h2>
+            <figure>
+                <video controls preload="metadata" playsinline poster="images/teaser.png" width="1280" height="720">
+                    <source src="videos/sdf_collisions.mp4" type="video/mp4">
+                </video>
+            </figure>
+        </section>
+
+        <section id="demo">
+            <h2>Live Demo</h2>
+            <p>The demo is the C++ implementation from our <a href="https://github.com/savant117/sdf-dcd-demo">repository</a>, compiled to WebAssembly with WebGL2. It runs Algorithm 1 on the CPU of your browser, so every parameter of the method can be changed while the simulation runs: the optimizer (Nelder&ndash;Mead, the ellipsoid method or stochastic gradient descent), the number of cached and random samples, curvature sampling, the softmax smoothing and the repulsion. You can also drop shapes into the scene or import your own OBJ file, which is baked into a voxel SDF in the browser.</p>
+            <div class="demo-frame" id="demo-frame" style="background-image: url('images/demo_poster.jpg')">
+                <button class="launch" id="demo-launch" aria-label="Launch the interactive demo">
+                    <span class="play"><svg width="30" height="30" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="#1f2733"/></svg></span>
+                    Launch interactive demo
+                </button>
+            </div>
+            <div class="scene-links" id="scene-links">
+                <button class="chip" data-scene="0">Box Stack</button>
+                <button class="chip" data-scene="1">Gear Stack</button>
+                <button class="chip" data-scene="3">Bend</button>
+                <button class="chip" data-scene="4">Twist</button>
+                <button class="chip" data-scene="5">Displace</button>
+                <button class="chip" data-scene="6">Pile of Chairs</button>
+                <button class="chip" data-scene="7">Spiky Wheel</button>
+                <button class="chip" data-scene="8">Cows on Spikes</button>
+                <button class="chip" data-scene="9">Bunny Pile</button>
+                <button class="chip" data-scene="10">Primitives</button>
+                <a class="chip" id="demo-fullscreen" href="demo/index.html" target="_blank" rel="noopener">Open full window &#8599;</a>
+            </div>
+            <div class="controls-help">
+                <span><kbd>Left drag</kbd> move a body (orbit on background)</span>
+                <span><kbd>Right drag</kbd> orbit the camera</span>
+                <span><kbd>Wheel</kbd> zoom, <kbd>Middle drag</kbd> pan</span>
+                <span><kbd>Space</kbd> drop a shape, <kbd>P</kbd> pause, <kbd>R</kbd> reset</span>
+            </div>
+            <p class="muted" style="margin-top: 12px;">Turn on <i>Cached Contacts</i> and <i>Random Contacts</i> to see the contact points: green points are warm started from the temporal cache, orange points come from new stochastic samples, and red lines show the contact normals. <i>Seeds</i> shows the high curvature seed points of each shape.</p>
+        </section>
+
+        <section id="method">
+            <h2>How It Works</h2>
+            <p>We treat SDF-SDF collision detection as an optimization problem: the points where two bodies overlap are the points where both signed distance fields are negative. For every pair of bodies whose bounding boxes overlap, we search for a small, well spread set of such points and turn them into contact constraints for the rigid body solver. Rather than densely sampling the overlap, which is expensive and produces redundant, ill-conditioned manifolds, each step only optimizes a handful of seed points.</p>
+
+            <div class="pipeline-scroll">
+            <svg class="pipeline" viewBox="0 0 960 236" role="img" aria-label="Pipeline: broad phase, seed points, minimization of the objective, contact synthesis, and manifold update which feeds the cache of the next step">
+                <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0 0 10 5 0 10z"/></marker>
+                    <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head accent" d="M0 0 10 5 0 10z"/></marker>
+                </defs>
+                <rect class="box" x="4" y="24" width="166" height="118" rx="10"/>
+                <text x="87" y="52" text-anchor="middle">Broad phase</text>
+                <text class="small" x="87" y="76" text-anchor="middle">Overlap of the bounding</text>
+                <text class="small" x="87" y="93" text-anchor="middle">boxes is the search</text>
+                <text class="small" x="87" y="110" text-anchor="middle">domain V (Sec. 3.1)</text>
+
+                <rect class="box green" x="202" y="24" width="166" height="118" rx="10"/>
+                <text x="285" y="52" text-anchor="middle">Seed points</text>
+                <text class="small" x="285" y="76" text-anchor="middle">Cached points advected</text>
+                <text class="small" x="285" y="93" text-anchor="middle">with the bodies (Eq. 6)</text>
+                <text class="small" x="285" y="110" text-anchor="middle">+ curvature samples (Eq. 7)</text>
+
+                <rect class="box accent" x="400" y="24" width="166" height="118" rx="10"/>
+                <text x="483" y="52" text-anchor="middle">Minimize g(x)</text>
+                <text class="small" x="483" y="76" text-anchor="middle">Softmax + repulsion</text>
+                <text class="small" x="483" y="93" text-anchor="middle">(Eq. 3) with Nelder-Mead,</text>
+                <text class="small" x="483" y="110" text-anchor="middle">ellipsoid method or SGD</text>
+
+                <rect class="box" x="598" y="24" width="166" height="118" rx="10"/>
+                <text x="681" y="52" text-anchor="middle">Contact</text>
+                <text class="small" x="681" y="76" text-anchor="middle">Depth d and normal n</text>
+                <text class="small" x="681" y="93" text-anchor="middle">from the more deeply</text>
+                <text class="small" x="681" y="110" text-anchor="middle">penetrating field (Eq. 5)</text>
+
+                <rect class="box" x="796" y="24" width="160" height="118" rx="10"/>
+                <text x="876" y="52" text-anchor="middle">Manifold</text>
+                <text class="small" x="876" y="76" text-anchor="middle">Merge duplicates,</text>
+                <text class="small" x="876" y="93" text-anchor="middle">sort by g and cache</text>
+                <text class="small" x="876" y="110" text-anchor="middle">the best n_cache</text>
+
+                <path class="arrow" d="M170 83h28" marker-end="url(#arrow)"/>
+                <path class="arrow" d="M368 83h28" marker-end="url(#arrow)"/>
+                <path class="arrow" d="M566 83h28" marker-end="url(#arrow)"/>
+                <path class="arrow" d="M764 83h28" marker-end="url(#arrow)"/>
+                <path class="loop" d="M876 142v52H285v-48" marker-end="url(#arrow-accent)"/>
+                <text class="small" x="580" y="214" text-anchor="middle">cache of the next time step (Sec. 3.5.1)</text>
+            </svg>
+            </div>
+
+            <h3>The collision objective</h3>
+            <p>Inside both bodies, \(\max(\phi_A, \phi_B)\) is negative, and its minimum is the point of deepest intersection (Eq. 1). Its gradient jumps where the two fields are equal, so we minimize a smooth upper bound instead, a square root based &ldquo;softmax&rdquo; (Eq. 2), and add a repulsion term that pushes each new point away from the points already found (Eq. 3):</p>
+            <div class="equation">$$ g(\mathbf{x}) = \frac{\phi_A + \phi_B + \sqrt{(\phi_A - \phi_B)^2 + \epsilon}}{2} \; - \; \alpha \sum_{\{\mathbf{x}_i, d_i, \mathbf{n}_i\} \in \mathcal{M}} \lVert \mathbf{x} - \mathbf{x}_i \rVert, \qquad \mathbf{x}^* = \operatorname*{arg\,min}_{\mathbf{x}} \, g(\mathbf{x}). $$</div>
+            <p>The repulsion spreads the manifold over the whole contact region instead of clustering it at a single deepest point, which is what keeps stacks and resting contact stable. Explore the objective below: drag the boxes, change the smoothing and the repulsion, place cached points, and click anywhere to watch an optimizer minimize \(g\) from that seed.</p>
+
+            <div class="explorer" id="explorer">
+                <div>
+                    <canvas id="objective-canvas" width="800" height="600" aria-label="Interactive plot of the collision objective of two overlapping boxes"></canvas>
+                    <div class="legend">
+                        <span><i style="border-color: #2f6db5"></i>Box A</span>
+                        <span><i style="border-color: #5e9c3f; border-top-style: dashed"></i>Box B</span>
+                        <span><i style="border-color: #111"></i>Zero level set of g</span>
+                        <span>&#10005; Global minimum</span>
+                        <span style="color: #e8871e">&#9675; Cached point</span>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div>
+                        <label>Objective</label>
+                        <div class="segmented" id="objective-mode">
+                            <button data-value="hardmax">Hardmax (Eq. 1)</button>
+                            <button data-value="softmax" class="active">Softmax (Eq. 2)</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="epsilon">Smoothing &epsilon; <output id="epsilon-value">100</output></label>
+                        <input type="range" id="epsilon" min="0" max="600" step="10" value="100">
+                    </div>
+                    <div>
+                        <label for="alpha">Repulsion &alpha; <output id="alpha-value">0.43</output></label>
+                        <input type="range" id="alpha" min="0" max="1" step="0.01" value="0.43">
+                    </div>
+                    <div>
+                        <label>Optimizer</label>
+                        <div class="segmented" id="optimizer">
+                            <button data-value="nm" class="active">Nelder-Mead</button>
+                            <button data-value="ellipsoid">Ellipsoid</button>
+                            <button data-value="sgd">SGD</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Clicking the plot</label>
+                        <div class="segmented" id="click-mode">
+                            <button data-value="optimize" class="active">Runs optimizer</button>
+                            <button data-value="point">Adds cached point</button>
+                        </div>
+                    </div>
+                    <div class="readout" id="readout">Click the plot to minimize g from that point.</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="button secondary" id="clear-points" style="flex: 1; justify-content: center;">Clear points</button>
+                        <button class="button secondary" id="reset-shapes" style="flex: 1; justify-content: center;">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Contact data</h3>
+            <p>Once the optimizer converges to \(\mathbf{x}^*\), the point is a contact if it lies inside both bodies. The penetration depth and normal come from the more deeply penetrating field, with the normal of \(B\) negated so that \(\mathbf{n}\) always points from \(A\) towards \(B\) (Eq. 5):</p>
+            <div class="equation">$$ (d, \mathbf{n}) = \begin{cases} \big(\phi_A(\mathbf{x}^*),\ \nabla\phi_A(\mathbf{x}^*)\big) & \phi_A(\mathbf{x}^*) < \phi_B(\mathbf{x}^*) \\ \big(\phi_B(\mathbf{x}^*),\ -\nabla\phi_B(\mathbf{x}^*)\big) & \text{otherwise.} \end{cases} $$</div>
+
+            <div class="side-by-side">
+                <div>
+                    <h3>Temporal caching</h3>
+                    <p>Contacts change little from one step to the next, so each pair keeps a cache of its \(n_\text{cache}\) best points. At the start of a step, the cached points are moved with the average velocity of the two bodies (only the moving one if the other is static) and used as seeds, which makes the optimizer converge in a few iterations and keeps the manifold from chattering (Eq. 6):</p>
+                    <div class="equation">$$ \mathbf{p} \leftarrow \mathbf{p} + \Delta t\, \frac{\text{VEL}(A, \mathbf{p}) + \text{VEL}(B, \mathbf{p})}{2}. $$</div>
+                    <p>After optimizing, points that converged within \(\tau\) of an earlier point are removed, the rest are sorted by \(g\) and the best \(n_\text{cache}\) become the cache of the next step. Seeds that improve on the cache survive, which gives the manifold an evolutionary refinement over time.</p>
+                </div>
+                <figure>
+                    <img src="images/cache_advection.png" alt="Cached points of the previous step moved forward by the velocities of the two boxes" width="647" height="634">
+                </figure>
+            </div>
+
+            <div class="side-by-side">
+                <div>
+                    <h3>Curvature-guided importance sampling</h3>
+                    <p>Caching alone cannot discover new contact regions, so every step also optimizes \(n_\text{rand}\) stochastic samples (and more when the cache is not yet full). In challenging contact, collision points tend to lie in regions of high curvature, so we precompute seed points on the surface of each shape where the magnitude of the Laplacian of the SDF exceeds \(\kappa\), approximated with finite differences of the gradient (Eq. 7):</p>
+                    <div class="equation">$$ \Delta\phi(\mathbf{x}) \approx \sum_{i=1}^{3} \frac{\big(\nabla\phi(\mathbf{x} + \delta\mathbf{e}_i) - \nabla\phi(\mathbf{x} - \delta\mathbf{e}_i)\big) \cdot \mathbf{e}_i}{2\delta}, \qquad |\Delta\phi| > \kappa. $$</div>
+                    <p>At run time, a stochastic sample is a random seed point of either body that lies inside the overlap of their bounding boxes. With models normalized to a unit cube we use \(\kappa = 4\) and \(\delta = 0.001\).</p>
+                </div>
+                <figure>
+                    <img src="images/seeds.png" alt="High curvature seed points on a gear, a bunny, a cylinder, a torus and a box" width="1186" height="720">
+                    <figcaption><b>Figure 3:</b> High curvature seed points (\(\kappa = 4\)).</figcaption>
+                </figure>
+            </div>
+
+            <h3>Optimizers</h3>
+            <p>The framework works with any minimizer of \(g\). We compare three: the derivative-free <b>Nelder&ndash;Mead</b> simplex method, whose simplex adapts to the local shape of the intersection and is the most robust choice for non-convex and distorted fields; the <b>ellipsoid method</b>, which converges quickly when the overlap is convex; and <b>stochastic gradient descent</b>, which is simple but prone to stalling in the local minima of non-convex intersections. All three search the overlap \(V\) of the bounding boxes and stop when the iterates move less than \(\tau\).</p>
+            <div class="card">
+                <b>Parameters used throughout the paper:</b>
+                \(n_\text{cache} = 4\), \(n_\text{rand} = 1\), \(\alpha = 0.01\), \(\tau = 0.01\), \(\epsilon = 0.1\), \(\Delta t = 16\) ms, and \(100^3\) voxel grids for mesh based SDFs. They are the defaults of the demo (<i>Paper Defaults</i>).
+            </div>
+        </section>
+
+        <section id="results">
+            <h2>Results</h2>
+            <figure>
+                <img src="images/iron_maiden.png" alt="Bunnies sandwiched between two plates covered in spikes" width="1837" height="942" loading="lazy">
+                <figcaption><b>Figure 4:</b> Bunny Iron Maiden. Voxel bunnies are sandwiched between analytical spike plates, which creates narrow basins of attraction and many disjoint contact regions.</figcaption>
+            </figure>
+
+            <div class="grid-2">
+                <figure>
+                    <img src="images/box_stacking.png" alt="A stack of analytical boxes" width="942" height="870" loading="lazy">
+                    <figcaption><b>Figure 5 (left):</b> Box stacking with analytical box SDFs.</figcaption>
+                </figure>
+                <figure>
+                    <img src="images/gear_stacking.png" alt="A stack of voxel gears" width="330" height="330" loading="lazy">
+                    <figcaption><b>Figure 5 (right):</b> Gear stacking with 100\(^3\) voxel SDFs, where explicit convex decompositions become expensive.</figcaption>
+                </figure>
+            </div>
+
+            <h3>Run-time performance</h3>
+            <p>Collision detection time per step \(t_\text{coll}\) of the GPU implementation, with 50 iterations and \(\tau = 0.01\) (Table 1). Nelder&ndash;Mead converges well on arbitrary geometry, the ellipsoid method is fastest on convex shapes, and SGD is consistently the slowest.</p>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr><th>Scene</th><th># bodies</th><th>Nelder&ndash;Mead</th><th>Ellipsoid</th><th>SGD</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Spikes (cows)</td><td>583</td><td class="best">0.7 ms</td><td>1.0 ms</td><td>1.3 ms</td></tr>
+                        <tr><td>Funnel (cylinders)</td><td>16000</td><td>2.2 ms</td><td class="best">1.8 ms</td><td>7.1 ms</td></tr>
+                        <tr><td>Funnel (horses)</td><td>16000</td><td class="best">20.0 ms</td><td>20.2 ms</td><td>42.3 ms</td></tr>
+                        <tr><td>Colosseum</td><td>8819</td><td>0.5 ms</td><td class="best">0.4 ms</td><td>1.9 ms</td></tr>
+                        <tr><td>Bunnies</td><td>4314</td><td class="best">1.8 ms</td><td>2.4 ms</td><td>5.1 ms</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>Accuracy and stability</h3>
+            <figure>
+                <img src="images/penetration_plots.png" alt="Maximum penetration depth over 1000 frames for bunnies and cows dropped on a plane, with uniform and curvature based sampling" width="1535" height="1088" loading="lazy">
+                <figcaption><b>Figure 6:</b> Maximum penetration depth of a bunny (top) and a cow (bottom) dropped with 100 random orientations. A larger cache converges to the dense oracle, and curvature-based sampling (right) suppresses interpenetration compared to uniform sampling (left).</figcaption>
+            </figure>
+            <figure>
+                <img src="images/energy_plots.png" alt="Kinetic energy over time for the pile of chairs and bunny iron maiden scenes" width="1535" height="539" loading="lazy">
+                <figcaption><b>Figure 7:</b> Kinetic energy of the Pile of Chairs and the Bunny Iron Maiden. With curvature-based sampling the scenes settle like the dense reference, while uniform sampling leaves persistent jitter.</figcaption>
+            </figure>
+
+            <h3>Operator-distorted fields</h3>
+            <figure>
+                <img src="images/distortions.png" alt="Piles of boxes distorted by bend, twist and displacement operators" width="1280" height="266" loading="lazy">
+                <figcaption><b>Figure 8:</b> Falling boxes, undistorted and distorted by the BEND, TWIST and DISPLACE operators. Warping breaks the Eikonal property of the fields, and the derivative-free Nelder&ndash;Mead optimizer is the most resilient to it.</figcaption>
+            </figure>
+            <figure>
+                <img src="images/other_examples.png" alt="Spinning gears, a pile of chairs and a spiky wheel" width="993" height="642" loading="lazy">
+                <figcaption><b>Figure 9:</b> Spinning Gears, Pile of Chairs and Spiky Wheel.</figcaption>
+            </figure>
+        </section>
+
+        <section id="code">
+            <h2>Code</h2>
+            <p>The <a href="https://github.com/savant117/sdf-dcd-demo">repository</a> contains a minimal C++ implementation of the method with a sequential impulse rigid body solver, written to be read alongside the paper. It builds natively with CMake and for the web with Emscripten, using SDL2 and Dear ImGui.</p>
+            <div class="code-map">
+                <code>collide.cpp</code><span>Algorithm 1, the objective (Eqs. 2&ndash;3), contact data (Eq. 5), cache advection (Eq. 6) and stochastic sampling</span>
+                <code>optimize.cpp</code><span>Nelder&ndash;Mead, the ellipsoid method and stochastic gradient descent</span>
+                <code>shapes.cpp</code><span>Analytical SDFs, distortion operators (Sec. 4.5) and curvature seed points (Eq. 7)</span>
+                <code>voxel.cpp</code><span>Voxel SDFs baked from triangle meshes (Sec. 3.6)</span>
+                <code>solver.cpp</code><span>Broad phase and the velocity level contact solver</span>
+            </div>
+            <pre style="margin-top: 16px;">git clone --recurse-submodules https://github.com/savant117/sdf-dcd-demo
+cd sdf-dcd-demo
+cmake -B build
+cmake --build build --config Release</pre>
+            <p class="muted">See the <a href="https://github.com/savant117/sdf-dcd-demo#building">README</a> for the web build, the controls and notes on the implementation.</p>
+        </section>
+
+        <section id="citation">
+            <h2>Citation</h2>
+            <pre id="bibtex"><button class="button secondary copy" id="copy-bibtex">Copy</button>@article{giles2026sdf,
+  title   = {Real-Time Collision Handling for Signed Distance Fields via
+             Caching and Importance Sampling},
+  author  = {Giles, Chris and Andrews, Sheldon},
+  journal = {Computer Graphics Forum},
+  volume  = {45},
+  number  = {7},
+  year    = {2026},
+  note    = {Pacific Graphics 2026}
+}</pre>
+        </section>
+    </main>
+
+    <footer>
+        &copy; 2026 The Authors. The paper is published open access in Computer Graphics Forum under the Creative Commons Attribution License.
+    </footer>
+
+    <script src="site.js"></script>
+    <script src="objective.js"></script>
+</body>
+</html>

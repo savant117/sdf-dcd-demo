@@ -1,0 +1,57 @@
+# Builds the WebAssembly demo and publishes it together with the project page in docs/ to GitHub
+# Pages. Requires Settings > Pages > Build and deployment > Source to be set to "GitHub Actions".
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Emscripten and Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install 4.0.3
+          "$HOME/emsdk/emsdk" activate 4.0.3
+
+      - name: Build the demo
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          emcmake cmake -B build-web -G Ninja
+          cmake --build build-web
+          mkdir -p docs/demo
+          cp build-web/index.html docs/demo/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
